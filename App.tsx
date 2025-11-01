@@ -20,11 +20,13 @@ export default function App() {
   const [hasPermission, setHasPermission] = useState(false);
   const devices = useCameraDevices();
   const [selectedDevice, setSelectedDevice] = useState(null);
-  const [usingFront, setUsingFront] = useState(true);
   const [fpsConfigs, setFpsConfigs] = useState([]);
   const cameraRef = useRef(null);
   const [recording, setRecording] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState(null);
+  const [cameraActive, setCameraActive] = useState(true);
+
+  const TARGET_FPS = 120;
 
   /* ---------- Permissions ---------- */
   useEffect(() => {
@@ -52,27 +54,27 @@ export default function App() {
     requestPermissions();
   }, []);
 
-  /* ---------- Camera Selection ---------- */
+  /* ---------- Camera Selection - BACK CAMERA ONLY ---------- */
   useEffect(() => {
     if (devices && Object.keys(devices).length > 0) {
       const allDevices = Object.values(devices);
-      const frontCam = allDevices.find(d => d.position === 'front') || allDevices[1];
       const backCam = allDevices.find(d => d.position === 'back') || allDevices[0];
-      const device = usingFront ? frontCam : backCam;
-      setSelectedDevice(device);
+      setSelectedDevice(backCam);
     }
-  }, [devices, usingFront]);
+  }, [devices]);
 
-  /* ---------- Load FPS info ---------- */
+  /* ---------- Load FPS info - BACK CAMERA ONLY ---------- */
   useEffect(() => {
     const loadFpsData = async () => {
       try {
         const configs = await CameraFpsModule.getHighSpeedVideoFps();
-        console.log('🎞 Supported High-Speed Configs:');
-        configs.forEach(cfg =>
-          console.log(`Cam ${cfg.cameraId}: ${cfg.width}x${cfg.height} @ ${cfg.fpsMin}-${cfg.fpsMax}`)
+        // ⭐ Filter to only show back camera (usually camera ID "0")
+        const backCameraConfigs = configs.filter(cfg => cfg.cameraId === "0");
+        console.log('🎞 Supported High-Speed Configs (Back Camera):');
+        backCameraConfigs.forEach(cfg =>
+          console.log(`${cfg.width}x${cfg.height} @ ${cfg.fpsMin}-${cfg.fpsMax} FPS`)
         );
-        setFpsConfigs(configs || []);
+        setFpsConfigs(backCameraConfigs || []);
       } catch (err) {
         console.error('❌ Error fetching FPS data:', err);
       }
@@ -90,8 +92,6 @@ export default function App() {
     setSelectedFormat(best);
     console.log(`🎞 Using preview format: ${best?.videoWidth}×${best?.videoHeight} @ ${best?.maxFps}fps`);
   }, [selectedDevice]);
-
-  const switchCamera = () => setUsingFront(prev => !prev);
 
   /* ---------- Photo Capture ---------- */
   const capturePhoto = async () => {
@@ -117,15 +117,30 @@ export default function App() {
   /* ---------- Slow-Motion Recording ---------- */
   const startSlowMo = async () => {
     try {
+      if (!selectedDevice) {
+        Alert.alert('Error', 'No camera selected');
+        return;
+      }
+
+      const cameraId = selectedDevice.id;
+      
       setRecording(true);
-      console.log('🚀 Starting true slow-motion recording...');
-      const videoPath = await CameraHighSpeedModule.startHighSpeedRecording(120);
+      setCameraActive(false);
+      
+      console.log(`🚀 Starting slow-motion on camera ${cameraId}...`);
+      
+      const videoPath = await CameraHighSpeedModule.startHighSpeedRecording(
+        cameraId,
+        TARGET_FPS
+      );
+      
       console.log('🎥 Recording started at:', videoPath);
-      Alert.alert('🎥 Recording Started', 'Recording slow-motion video at 240 FPS');
+      Alert.alert('🎥 Recording Started', `Recording slow-motion video at ${TARGET_FPS} FPS`);
     } catch (err) {
       console.error('Start slow-mo error:', err);
       Alert.alert('❌ Error', err.message);
       setRecording(false);
+      setCameraActive(true);
     }
   };
 
@@ -139,6 +154,7 @@ export default function App() {
       Alert.alert('❌ Error', err.message);
     } finally {
       setRecording(false);
+      setCameraActive(true);
     }
   };
 
@@ -165,25 +181,21 @@ export default function App() {
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         device={selectedDevice}
-        isActive={true}
+        isActive={cameraActive}
         photo={true}
         video={true}
         format={selectedFormat}
       />
 
       <View style={styles.controls}>
-        <TouchableOpacity style={styles.button} onPress={switchCamera}>
-          <Text style={styles.buttonText}>
-            Switch to {usingFront ? 'Back' : 'Front'}
-          </Text>
-        </TouchableOpacity>
+        {/* ⭐ REMOVED SWITCH CAMERA BUTTON */}
 
         {!recording ? (
           <TouchableOpacity
             style={[styles.button, { backgroundColor: '#28a745' }]}
             onPress={startSlowMo}
           >
-            <Text style={styles.buttonText}>🎥 Start Slow-Mo 240 FPS</Text>
+            <Text style={styles.buttonText}>🎥 Start Slow-Mo {TARGET_FPS} FPS</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -194,12 +206,12 @@ export default function App() {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={[styles.button, { backgroundColor: '#007bff' }]}
           onPress={capturePhoto}
         >
           <Text style={styles.buttonText}>📸 Capture Photo</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
 
       <View style={styles.fpsContainer}>
@@ -209,7 +221,7 @@ export default function App() {
             { color: maxFps >= 240 ? '#00ff88' : maxFps >= 120 ? '#ffcc00' : '#fff' },
           ]}
         >
-          🎞 Supported FPS:{' '}
+          🎞 Back Camera FPS:{' '}
           {maxFps >= 240
             ? '🚀 240 FPS Ultra Slow-Mo'
             : maxFps >= 120
@@ -219,7 +231,7 @@ export default function App() {
         <ScrollView style={styles.scroll}>
           {fpsConfigs.map((cfg, i) => (
             <Text key={i} style={styles.fpsText}>
-              📱 Cam {cfg.cameraId}: {cfg.width}×{cfg.height} → {cfg.fpsMin}–{cfg.fpsMax} FPS
+              📱 {cfg.width}×{cfg.height} → {cfg.fpsMin}–{cfg.fpsMax} FPS
             </Text>
           ))}
         </ScrollView>

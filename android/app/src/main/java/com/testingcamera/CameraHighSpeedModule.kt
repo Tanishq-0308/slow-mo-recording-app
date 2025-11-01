@@ -21,96 +21,95 @@ class CameraHighSpeedModule(private val reactContext: ReactApplicationContext) :
   override fun getName() = "CameraHighSpeedModule"
 
   @ReactMethod
-  fun startHighSpeedRecording(fps: Int, promise: Promise) {
-    try {
-      val manager = reactContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-      val cameraId = manager.cameraIdList.first { id ->
-        val chars = manager.getCameraCharacteristics(id)
-        val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-        caps?.contains(
-          CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO
-        ) == true
-      }
-
-      val characteristics = manager.getCameraCharacteristics(cameraId)
-      val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-      val highSpeedSizes = map?.getHighSpeedVideoSizesFor(Range(fps, fps))
-      val size: Size = highSpeedSizes?.firstOrNull()
-        ?: map?.getOutputSizes(MediaRecorder::class.java)?.firstOrNull()
-        ?: Size(1920, 1080)
-
-      outputFile = File(
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-        "TestingCamera/slowmo_${System.currentTimeMillis()}_${fps}fps.mp4"
-      )
-      outputFile!!.parentFile?.mkdirs()
-
-      val playbackFps = 30
-
-      mediaRecorder = MediaRecorder().apply {
-        setVideoSource(MediaRecorder.VideoSource.SURFACE)
-        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-        setVideoEncodingBitRate(20_000_000)
-        setVideoFrameRate(playbackFps)
-        setCaptureRate(fps.toDouble())
-        setVideoSize(size.width, size.height)
-        setOutputFile(outputFile!!.absolutePath)
-        prepare()
-      }
-
-      manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
-        override fun onOpened(device: CameraDevice) {
-          cameraDevice = device
-          val surface = mediaRecorder!!.surface
-
-          device.createConstrainedHighSpeedCaptureSession(
-            listOf(surface),
-            object : CameraCaptureSession.StateCallback() {
-              override fun onConfigured(session: CameraCaptureSession) {
-                captureSession = session
-                
-                // Create the capture request
-                val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                  addTarget(surface)
-                  set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
-                }
-                
-                // Create high-speed request list and submit it
-                val highSpeedSession = session as CameraConstrainedHighSpeedCaptureSession
-                val requestList = highSpeedSession.createHighSpeedRequestList(requestBuilder.build())
-                
-                // Start the MediaRecorder first
-                mediaRecorder?.start()
-                
-                // Then start capturing frames
-                highSpeedSession.setRepeatingBurst(requestList, null, null)
-                
-                Log.i("CameraHighSpeed", "🎥 Recording started: ${outputFile!!.absolutePath}")
-                promise.resolve(outputFile!!.absolutePath)
-              }
-
-              override fun onConfigureFailed(session: CameraCaptureSession) {
-                promise.reject("CONFIG_FAILED", "High-speed session failed")
-              }
-            },
-            null
-          )
-        }
-
-        override fun onDisconnected(device: CameraDevice) {
-          promise.reject("DISCONNECTED", "Camera disconnected")
-        }
-
-        override fun onError(device: CameraDevice, error: Int) {
-          promise.reject("ERROR", "Camera error $error")
-        }
-      }, null)
-    } catch (e: Exception) {
-      e.printStackTrace()
-      promise.reject("START_ERROR", e)
+fun startHighSpeedRecording(cameraId: String, fps: Int, promise: Promise) {  // ⭐ Add cameraId parameter
+  try {
+    val manager = reactContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    
+    // ⭐ Verify the camera supports high-speed video
+    val characteristics = manager.getCameraCharacteristics(cameraId)
+    val caps = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+    val supportsHighSpeed = caps?.contains(
+      CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO
+    ) == true
+    
+    if (!supportsHighSpeed) {
+      promise.reject("NOT_SUPPORTED", "Camera $cameraId does not support high-speed video")
+      return
     }
+
+    val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+    val highSpeedSizes = map?.getHighSpeedVideoSizesFor(Range(fps, fps))
+    val size: Size = highSpeedSizes?.firstOrNull()
+      ?: map?.getOutputSizes(MediaRecorder::class.java)?.firstOrNull()
+      ?: Size(1920, 1080)
+
+    outputFile = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+      "TestingCamera/slowmo_${System.currentTimeMillis()}_${fps}fps.mp4"
+    )
+    outputFile!!.parentFile?.mkdirs()
+
+    val playbackFps = 30
+
+    mediaRecorder = MediaRecorder().apply {
+      setVideoSource(MediaRecorder.VideoSource.SURFACE)
+      setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+      setVideoEncoder(MediaRecorder.VideoEncoder.H264)
+      setVideoEncodingBitRate(20_000_000)
+      setVideoFrameRate(playbackFps)
+      setCaptureRate(fps.toDouble())
+      setVideoSize(size.width, size.height)
+      setOutputFile(outputFile!!.absolutePath)
+      prepare()
+    }
+
+    manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+      override fun onOpened(device: CameraDevice) {
+        cameraDevice = device
+        val surface = mediaRecorder!!.surface
+
+        device.createConstrainedHighSpeedCaptureSession(
+          listOf(surface),
+          object : CameraCaptureSession.StateCallback() {
+            override fun onConfigured(session: CameraCaptureSession) {
+              captureSession = session
+              
+              val requestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                addTarget(surface)
+                set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(fps, fps))
+              }
+              
+              val highSpeedSession = session as CameraConstrainedHighSpeedCaptureSession
+              val requestList = highSpeedSession.createHighSpeedRequestList(requestBuilder.build())
+              
+              mediaRecorder?.start()
+              highSpeedSession.setRepeatingBurst(requestList, null, null)
+              
+              Log.i("CameraHighSpeed", "🎥 Recording started on camera $cameraId: ${outputFile!!.absolutePath}")
+              promise.resolve(outputFile!!.absolutePath)
+            }
+
+            override fun onConfigureFailed(session: CameraCaptureSession) {
+              promise.reject("CONFIG_FAILED", "High-speed session failed")
+            }
+          },
+          null
+        )
+      }
+
+      override fun onDisconnected(device: CameraDevice) {
+        promise.reject("DISCONNECTED", "Camera disconnected")
+      }
+
+      override fun onError(device: CameraDevice, error: Int) {
+        promise.reject("ERROR", "Camera error $error")
+      }
+    }, null)
+  } catch (e: Exception) {
+    e.printStackTrace()
+    promise.reject("START_ERROR", e)
   }
+}
 
   @ReactMethod
   fun stopHighSpeedRecording(promise: Promise) {
