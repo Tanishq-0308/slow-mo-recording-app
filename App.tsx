@@ -9,10 +9,12 @@ import {
   PermissionsAndroid,
   Platform,
   NativeModules,
+  NativeEventEmitter,
 } from 'react-native';
 import { Camera, useCameraDevices } from 'react-native-vision-camera';
 import RNFS from 'react-native-fs';
 import CameraRoll from '@react-native-camera-roll/camera-roll';
+import NativeTextureView from './NativeTextureView';
 
 const { CameraFpsModule, CameraHighSpeedModule } = NativeModules;
 
@@ -126,6 +128,8 @@ export default function App() {
       
       setRecording(true);
       setCameraActive(false);
+
+      await delay(50);
       
       console.log(`🚀 Starting slow-motion on camera ${cameraId}...`);
       
@@ -143,6 +147,10 @@ export default function App() {
       setCameraActive(true);
     }
   };
+
+  const delay=(ms:number)=>{
+    return new Promise<void>(resolve => setTimeout(resolve, ms));
+  }
 
   const stopSlowMo = async () => {
     try {
@@ -177,6 +185,16 @@ export default function App() {
 
   return (
     <View style={styles.container}>
+
+          {/* HIGH-SPEED PREVIEW (TextureView) */}
+    <NativeTextureView
+      style={StyleSheet.absoluteFill}
+      onSurfaceReady={() => {
+  CameraHighSpeedModule.attachPreviewSurface(1);
+}}
+
+    />
+    {!recording && (
       <Camera
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -186,6 +204,7 @@ export default function App() {
         video={true}
         format={selectedFormat}
       />
+    )}
 
       <View style={styles.controls}>
         {/* ⭐ REMOVED SWITCH CAMERA BUTTON */}

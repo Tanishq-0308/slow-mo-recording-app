@@ -16,6 +16,7 @@ class MainApplication : Application(), ReactApplication {
         // ✅ Add custom native packages here — no commas between lines!
         add(CameraFpsPackage())
         add(CameraHighSpeedPackage())
+        add(NativeTexturePackage())
       },
     )
   }
